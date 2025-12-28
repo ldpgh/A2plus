@@ -22,6 +22,16 @@
 #*                                                                         *
 #***************************************************************************
 
+### lutz_dd, 2025_12_12 ... start
+import importlib
+import a2p_helper
+importlib.reload(a2p_helper)
+a2p_helper.pp_module(__file__)
+mydebug=42
+### lutz_dd, 2025_12_12 ... end
+
+import re
+import pdb
 import os
 import sys
 import FreeCAD, FreeCADGui
@@ -210,7 +220,9 @@ def importPartFromFile(
         extractSingleShape = False, # load only a single user defined shape from file
         desiredShapeLabel = None,
         importToCache = False,
-        cacheKey = ""
+        cacheKey = "",
+### lutz_dd, 2025_12_12
+        instanceParameters = None
         ):
     doc = _doc
     #-------------------------------------------
@@ -243,6 +255,63 @@ def importPartFromFile(
             msg = translate("A2plus", "A part can only be imported from a FreeCAD '*.FCStd' file")
             QtGui.QMessageBox.information( QtGui.QApplication.activeWindow(), translate("A2plus", "Value Error"), msg )
             return
+
+### lutz_dd, 2025_12_12 ... start
+    #-------------------------------------------
+    # Instance-spezifische Parameter des Spreadsheet setzen, wenn
+    # instanceParameters als Funktions-Argument angegeben wurden
+    #-------------------------------------------
+    
+    # Interaktive Platzierung in der Workbench gibt der Funktion das 
+    # Argument  instanceParameters  nicht mit.
+    # Deshalb Dictionary  instanceParameter  erzeugen
+    if not instanceParameters:
+      sheet = None
+      for obj in importDoc.Objects:
+        if obj.TypeId == "Spreadsheet::Sheet" and obj.Label == "Parameters":
+          sheet = obj
+          break
+      instanceParameters={}
+      # Jede Zeile ist ein <Cell ... /> String
+      for cell in sheet.cells.Content.split("\n"):
+        # alias="..."
+        alias_match = re.findall(r'alias="([^"]+)"', cell)
+        # content="..."
+        content_match = re.findall(r'content="([^"]*)"', cell)
+        if alias_match and content_match:
+          alias = alias_match[0]
+          content = content_match[0]
+          instanceParameters[alias] = content
+
+    if instanceParameters:
+        try:
+            # Spreadsheet mit Label == "Parameters" suchen
+            sheet = None
+            for obj in importDoc.Objects:
+                if obj.TypeId == "Spreadsheet::Sheet" and obj.Label == "Parameters":
+                    sheet = obj
+                    break
+            if sheet:
+              
+                for key, value in instanceParameters.items():
+                    try:
+                        sheet.set(key, str(value))
+                        FreeCAD.Console.PrintMessage(
+                            f"[A2plus] Instanz-Parameter gesetzt: {key} = {value}\n"
+                        )
+                    except Exception as e:
+                        FreeCAD.Console.PrintError(
+                            f"[A2plus] Fehler beim Setzen von {key}: {e}\n"
+                        )
+                importDoc.recompute()
+            else:
+                FreeCAD.Console.PrintError(
+                    "[A2plus] Kein Spreadsheet 'Parameters' im importierten Dokument gefunden.\n"
+                )
+        except Exception as e:
+            FreeCAD.Console.PrintError("[A2plus] Ausnahme bei Instanz-Parameter:\n")
+            FreeCAD.Console.PrintError(str(e) + "\n")
+### lutz_dd, 2025_12_12 ... end
 
     #-------------------------------------------
     # recalculate imported part if requested by preferences
@@ -326,7 +395,72 @@ def importPartFromFile(
         newObj = doc.addObject( "Part::FeaturePython", str(partName.encode('utf-8')) )    # works on Python 3.6.5
         newObj.Label = partLabel
 
+
     Proxy_importPart(newObj)
+
+
+### lutz_dd, 2025_12_12 ... start
+    if instanceParameters:
+        a2p_helper.pp("DEBUG"*5)
+        print("DEBUG"*5)
+        a2p_helper.QtPdb().set_trace()
+        for key, value in instanceParameters.items():
+            # Property-Typ anhand des Werts wählen
+            if isinstance(value, (int, float)):
+                ptype = "App::PropertyFloat"
+            else:
+                ptype = "App::PropertyString"
+
+            # Property hinzufügen, falls noch nicht vorhanden
+            if not hasattr(newObj, key):
+                newObj.addProperty(ptype, "par_"+key, "importPart", f"Instanz-Parameter par_{key}")
+
+            # Initialwert setzen
+            setattr(newObj, "par_"+key, value)
+
+    if 1==0:
+      # HACK ... das funktioniert beim Editieren in der GUI nicht.
+      #-------------------------------------------
+      # Instanz-Parameter dauerhaft speichern
+      #-------------------------------------------
+      newObj.addProperty(
+          "App::PropertyMap",
+          "instanceParameters",
+          "importPart",
+          "Parameter overrides for this instance"
+      )
+      
+      # EditorMode 0 = normal/editierbar, 1 = read-only
+      newObj.setEditorMode("instanceParameters", 0)
+      
+      global mydebug
+      mydebug=[newObj, instanceParameters]
+      
+      if instanceParameters:
+          #HACK ... nur eine Element ... auf beliebige Anzahl noch erweitern
+          param_name=list(instanceParameters)[0]
+          newObj.instanceParameters = { param_name : "%r" % instanceParameters[param_name] }
+    if 1==0:
+      # HACK ... Funktion des Proxy nicht ganz klar, noch mal ueberdenken.
+      #-------------------------------------------
+      # Instanz-Parameter im Proxy speichern (nicht als App-Property)
+      #-------------------------------------------
+      if instanceParameters:
+          try:
+              if not hasattr(newObj, "Proxy") or newObj.Proxy is None:
+                  FreeCAD.Console.PrintError("[A2plus] Kein Proxy am importierten Objekt vorhanden.\n")
+              else:
+                  # Wir speichern die Parameter direkt im Proxy-Python-Objekt
+                  newObj.Proxy.instanceParameters = dict(instanceParameters)
+                  FreeCAD.Console.PrintMessage(
+                      f"[A2plus] Instanz-Parameter im Proxy gespeichert: {newObj.Name}\n"
+                  )
+          except Exception as e:
+              FreeCAD.Console.PrintError(
+                  "[A2plus] Konnte Instanz-Parameter nicht im Proxy speichern: {}\n".format(e)
+              )
+### lutz_dd, 2025_12_12 ... end
+
     if FreeCAD.GuiUp:
         ImportedPartViewProviderProxy(newObj.ViewObject)
 
@@ -355,6 +489,8 @@ def importPartFromFile(
     newObj.subassemblyImport = subAssemblyImport
     newObj.setEditorMode("subassemblyImport",1)
 
+    a2p_helper.pp(__file__,"importDoc",importDoc)
+    a2p_helper.pp(__file__,"importDoc.Name",importDoc.Name)
     if subAssemblyImport:
         if extractSingleShape:
             newObj.muxInfo, newObj.Shape, newObj.ViewObject.DiffuseColor, newObj.ViewObject.Transparency = \
