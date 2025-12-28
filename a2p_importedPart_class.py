@@ -22,26 +22,43 @@
 #*                                                                         *
 #***************************************************************************
 
+### lutz_dd, 2025_12_12 ... start
+import importlib
+import a2p_helper
+importlib.reload(a2p_helper)
+a2p_helper.pp_module(__file__)
+mydebug=42
+import a2p_MuxAssembly
+### lutz_dd, 2025_12_12 ... end
+
 import FreeCAD
 import FreeCADGui
 import Part
 import os
+import time
 import copy
 import numpy
 from FreeCAD import  Base
 from PySide import QtGui
 from a2p_translateUtils import *
 import a2plib
+import traceback
+import pdb
+
 #==============================================================================
 class Proxy_importPart:
     """The a2p importPart object."""
 
     def __init__(self,obj):
+#HACK lutz_dd
+        FreeCAD.Console.PrintMessage("Proxy_importPart::__init__\n")
         obj.Proxy = self
         Proxy_importPart.setProperties(self,obj)
         self.type = "a2p_importPart"
 
     def setProperties(self,obj):
+#HACK lutz_dd
+        FreeCAD.Console.PrintMessage("Proxy_importPart::setProperties\n")
         propList = obj.PropertiesList
 
         if not "objectType" in propList:
@@ -99,6 +116,120 @@ class Proxy_importPart:
                 lcsGroup = obj.lcsLink[0]
                 lcsGroup.Placement = obj.Placement
                 lcsGroup.purgeTouched() #untouch the lcsGroup, otherwise it stays touched.
+
+### lutz_dd, 2025_12_12 ... start
+    def onChanged(self, fp, prop):
+        a2p_helper.pp("Proxy_importPart::onChanged ... \t fp:%r \t prop:%r" % (fp.Label, prop))
+        # Nur reagieren, wenn es ein Instanz-Parameter ist
+        if prop in fp.PropertiesList and prop not in [
+            "Proxy", "Label", "Placement", "Shape"
+            # HACK ... lutz_dd ... Umstellen auf Suche nach "par_" am Anfang von prop
+            , "sourceFile"
+            , "timeLastImport", "fixedPosition", "subassemblyImport", "muxInfo"
+        ]:
+            try:
+                # Child-Dokument öffnen oder referenzieren
+                importDoc = None
+                if "sourceFile" in dir(fp):
+                  if (os.path.isfile(fp.sourceFile) and fp.sourceFile.lower().endswith(".fcstd")):
+                    for d in FreeCAD.listDocuments().values():
+                        if os.path.normpath(d.FileName) == os.path.normpath(fp.sourceFile):
+                            importDoc = d
+                            break
+                    if importDoc is None:
+                        importDoc = FreeCAD.openDocument(fp.sourceFile)
+
+                # Spreadsheet "Parameters" im Child aktualisieren
+                if importDoc:
+                    sheet = None
+                    for o in importDoc.Objects:
+                        if o.TypeId == "Spreadsheet::Sheet" and o.Label == "Parameters":
+                            sheet = o
+                            break
+                    if sheet:
+                        # Beruecksichtigen, das 'par_' beim Platzieren hinzugefuegt wurde.
+                        subprop=prop.replace("par_","")
+                        sheet.set(subprop, str(getattr(fp, prop)))
+                        importDoc.recompute()
+                        FreeCAD.Console.PrintMessage(
+                            f"[A2plus] {subprop} aktualisiert: {getattr(fp, prop)}\n"
+                        )
+                        # HACK ... einfach die aktuelle Zeit verwendet
+#                        fp.setEditorMode("timeLastImport",1)
+#                        fp.timeLastImport=time.time()
+
+                    a2p_helper.pp("-"*22)
+                    a2p_helper.pp(__file__,"importDoc",importDoc)
+                    a2p_helper.pp(__file__,"importDoc.Name",importDoc.Name)
+                    a2p_helper.pp("x"*22)
+                    fp.muxInfo, fp.Shape, fp.ViewObject.DiffuseColor, fp.ViewObject.Transparency = \
+                         a2p_MuxAssembly.muxAssemblyWithTopoNames(importDoc)
+                    a2p_helper.pp("_"*22)
+#                    fp.Document.recompute()
+#                    if importToCache: # this import is used to update already imported parts
+#                      objectCache.add(cacheKey, fp)
+
+                global mydebug
+                mydebug=fp
+                
+            except Exception as e:
+                FreeCAD.Console.PrintError(traceback.format_exc())
+                FreeCAD.Console.PrintError(f"[A2plus] Fehler beim Aktualisieren von {prop}: {e}\n")
+
+
+    if 1==0:
+      def onChanged(self, fp, prop):
+          if prop in ["CubeSize", "ww"]:
+              try:
+                  # Child-Dokument öffnen oder referenzieren
+                  importDoc = None
+                  if os.path.isfile(fp.sourceFile) and fp.sourceFile.lower().endswith(".fcstd"):
+                      for d in FreeCAD.listDocuments().values():
+                          if os.path.normpath(d.FileName) == os.path.normpath(fp.sourceFile):
+                              importDoc = d
+                              break
+                      if importDoc is None:
+                          importDoc = FreeCAD.openDocument(fp.sourceFile)
+
+                  # Spreadsheet "Parameters" im Child aktualisieren
+                  if importDoc:
+                      sheet = None
+                      for o in importDoc.Objects:
+                          if o.TypeId == "Spreadsheet::Sheet" and o.Label == "Parameters":
+                              sheet = o
+                              break
+                      if sheet:
+                          sheet.set(prop, str(getattr(fp, prop)))
+                          importDoc.recompute()
+                          FreeCAD.Console.PrintMessage(
+                              f"[A2plus] {prop} aktualisiert: {getattr(fp, prop)}\n"
+                          )
+              except Exception as e:
+                  FreeCAD.Console.PrintError(f"[A2plus] Fehler beim Aktualisieren von {prop}: {e}\n")
+
+    if 1==0:
+      def onChanged(self, fp, prop):
+          if prop == "instanceParameters":
+              try:
+                  # Spreadsheet im importierten Dokument aktualisieren
+                  importDoc = FreeCAD.openDocument(fp.sourceFile)
+                  sheet = None
+                  for o in importDoc.Objects:
+                      if o.TypeId == "Spreadsheet::Sheet" and o.Label == "Parameters":
+                          sheet = o
+                          break
+                  if sheet:
+                      for k, v in fp.instanceParameters.items():
+                          sheet.set(k, str(v))
+                      importDoc.recompute()
+                      FreeCAD.Console.PrintMessage(
+                          f"[A2plus] Aktualisiert: {fp.Label}.instanceParameters → {fp.instanceParameters}\n"
+                      )
+              except Exception as e:
+                  FreeCAD.Console.PrintError(f"[A2plus] Fehler beim Aktualisieren: {e}\n")
+
+### lutz_dd, 2025_12_12 ... end
+
 
 
 #==============================================================================
