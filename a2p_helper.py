@@ -68,7 +68,7 @@ def neu():
   FreeCAD.newDocument()
   doc=FreeCAD.activeDocument()
   
-  dirName='C:/Users/lud/Desktop/DESKTOP_ROOMING/FreeCAD/A2P_HIER_PARAMETER/'
+  dirName='%APPDATA%/FreeCAD/A2plus_design_files/'
 #  a2p_importpart.importPartFromFile(
 #    doc, dirName+'hier_level_2.FCStd', instanceParameters={"ww":44, "ll":22, "hh":33}
 #  )
@@ -92,4 +92,5 @@ class QtPdb(pdb.Pdb):
       stdin=open('CONIN$', 'r'),
       stdout=open('CONOUT$', 'w')
   )
+
 
